@@ -77,19 +77,21 @@ bool CKey::matches(KeyEvent ev, xkb_state*) const {
     if (empty())
         return false;
 
-    return ev.visit([&](auto&& value) {
-        using T = std::decay_t<decltype(value)>;
-        if constexpr (std::is_same_v<T, SKeysymPattern>)
-            return m_sym && value.sym == *m_sym;
-        else if constexpr (std::is_same_v<T, SKeycodePattern>)
-            return (m_sym && value.sym == *m_sym) || (m_code && value.code == *m_code);
-        else if constexpr (std::is_same_v<T, SSidedModifierPattern>)
-            return (m_sym && value.sym == *m_sym /* modifier will match obviously */) || (!m_sym /* un-sided */ && m_mod && value.modMask == *m_mod);
-        else if constexpr (std::is_same_v<T, SExternalEventPattern>)
-            return m_event && value.ev == *m_event;
-        else
-            return false;
-    });
+    return std::visit(
+        [&](auto&& value) {
+            using T = std::decay_t<decltype(value)>;
+            if constexpr (std::is_same_v<T, SKeysymPattern>)
+                return m_sym && value.sym == *m_sym;
+            else if constexpr (std::is_same_v<T, SKeycodePattern>)
+                return (m_sym && value.sym == *m_sym) || (m_code && value.code == *m_code);
+            else if constexpr (std::is_same_v<T, SSidedModifierPattern>)
+                return (m_sym && value.sym == *m_sym /* modifier will match obviously */) || (!m_sym /* un-sided */ && m_mod && value.modMask == *m_mod);
+            else if constexpr (std::is_same_v<T, SExternalEventPattern>)
+                return m_event && value.ev == *m_event;
+            else
+                return false;
+        },
+        ev);
 }
 
 bool CKey::matches(const SResolvedKey& key) const {

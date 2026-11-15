@@ -462,6 +462,20 @@ std::string getBuiltSystemLibraryNames() {
     return result;
 }
 
+template <std::ranges::input_range R>
+bool starts_with(R&& r, std::string_view prefix) {
+    auto it  = std::ranges::begin(r);
+    auto end = std::ranges::end(r);
+
+    for (char c : prefix) {
+        if (it == end || *it != c)
+            return false;
+        ++it;
+    }
+
+    return true;
+}
+
 bool truthy(const std::string& str) {
     using std::operator""sv;
 
@@ -473,8 +487,7 @@ bool truthy(const std::string& str) {
         return sc<char>(std::tolower(ch));
     });
 
-    return [&](auto&&... prefixes) -> bool {
-        return (... || std::ranges::starts_with(str_view, prefixes));
-    }("true"sv, "yes"sv, "on"sv);
-    // clang-format on
+    return starts_with(str_view, "true") ||
+           starts_with(str_view, "yes") ||
+           starts_with(str_view, "on");
 }
