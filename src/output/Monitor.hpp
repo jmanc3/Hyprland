@@ -41,6 +41,7 @@ namespace Monitor {
     class CMonitorResources;
     class CMonitorFrameScheduler;
     class COutputCommitCoordinator;
+    class CMonitorWindowTransaction;
     class CMonitor;
 
     class CMonitorState {
@@ -138,6 +139,7 @@ namespace Monitor {
 
         UP<CMonitorFrameScheduler>     m_frameScheduler;
         UP<COutputCommitCoordinator>   m_commitCoordinator;
+        UP<CMonitorWindowTransaction>  m_windowTransaction;
 
         // mirroring
         PHLMONITORREF              m_mirrorOf;
@@ -214,7 +216,7 @@ namespace Monitor {
             DS_BLOCK_FAILED    = (1 << 11),
             DS_BLOCK_CM        = (1 << 12),
 
-            DS_CHECKS_COUNT = 14,
+            DS_CHECKS_COUNT = 13,
         };
 
         // keep in sync with socket1 output
@@ -341,36 +343,38 @@ namespace Monitor {
         bool                                                        gammaRampsInUse();
 
         std::optional<NColorManagement::PImageDescription>          getFSImageDescription();
+        std::optional<NColorManagement::PImageDescription>          getAutoHDRImageDescription(const SP<CWLSurfaceResource>& surface);
 
         NColorManagement::SPCPRimaries                              getMasteringPrimaries();
         NColorManagement::SImageDescription::SPCMasteringLuminances getMasteringLuminances();
+        NColorManagement::PImageDescription                         getHDRImageDescription(NCMType::eCMType cmType);
 
         uint32_t                                                    getPreferredReadFormat();
 
         bool                                                        needsCM();
         /// Can do CM without shader (forDSmode ? check output image description : check workbuffer image description)
-        bool                                                               canNoShaderCM(bool forDSmode = false);
-        bool                                                               doesNoShaderCM();
+        bool                                canNoShaderCM(bool forDSmode = false);
+        bool                                doesNoShaderCM();
 
-        bool                                                               m_enabled             = false;
-        bool                                                               m_renderingInitPassed = false;
+        bool                                m_enabled             = false;
+        bool                                m_renderingInitPassed = false;
 
-        PHLWINDOWREF                                                       m_previousFSWindow;
-        bool                                                               m_needsHDRupdate         = false;
-        bool                                                               m_hdrMetadataFromSurface = false;
+        PHLWINDOWREF                        m_previousFSWindow;
+        PHLWINDOWREF                        m_autoHDRWindow;
+        bool                                m_needsHDRupdate         = false;
+        bool                                m_hdrMetadataFromSurface = false;
 
-        std::optional<dev_t>                                               m_cachedAllocatorDRMDev;
-        std::optional<dev_t>                                               m_cachedCompositorDRMDev;
-        int                                                                m_cachedAllocatorDRMFD  = -1;
-        int                                                                m_cachedCompositorDRMFD = -1;
-        std::optional<bool>                                                m_cachedSameGPU;
+        std::optional<dev_t>                m_cachedAllocatorDRMDev;
+        std::optional<dev_t>                m_cachedCompositorDRMDev;
+        int                                 m_cachedAllocatorDRMFD  = -1;
+        int                                 m_cachedCompositorDRMFD = -1;
+        std::optional<bool>                 m_cachedSameGPU;
 
-        NColorManagement::PImageDescription                                m_imageDescription = NColorManagement::CImageDescription::from(NColorManagement::SImageDescription{});
-        bool                                                               m_noShaderCTM      = false; // sets drm CTM, restore needed
+        NColorManagement::PImageDescription m_imageDescription = NColorManagement::CImageDescription::from(NColorManagement::SImageDescription{});
+        bool                                m_noShaderCTM      = false; // sets drm CTM, restore needed
 
-        bool                                                               m_blurFBDirty        = true;
-        bool                                                               m_blurFBShouldRender = false;
-        std::vector<std::pair<WP<CWLSurfaceResource>, CHLBufferReference>> m_usedAsyncBuffers;
+        bool                                m_blurFBDirty        = true;
+        bool                                m_blurFBShouldRender = false;
 
         // For the list lookup
 

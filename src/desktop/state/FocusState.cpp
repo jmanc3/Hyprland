@@ -8,7 +8,6 @@
 #include "../../ipc/s2/S2.hpp"
 #include "../../managers/input/InputManager.hpp"
 #include "../../managers/SeatManager.hpp"
-#include "../../protocols/PointerConstraints.hpp"
 #include "animation/WorkspaceAnimationController.hpp"
 #include "../../managers/fullscreen/FullscreenController.hpp"
 #include "../../layout/LayoutManager.hpp"
@@ -125,6 +124,8 @@ void CFocusState::rawWindowFocus(PHLWINDOW pWindow, eFocusReason reason, SP<CWLS
     if (pWindow)
         g_layoutManager->bringTargetToTop(pWindow->windowTarget());
 
+    auto constraintGuard = g_pInputManager->pointerConstraints().suspend();
+
     if (!pWindow || !validMapped(pWindow)) {
 
         if (m_focusWindow.expired() && !pWindow)
@@ -239,7 +240,7 @@ void CFocusState::rawSurfaceFocus(SP<CWLSurfaceResource> pSurface, PHLWINDOW pWi
         return;
     }
 
-    const auto PLASTSURF = m_focusSurface.lock();
+    auto constraintGuard = g_pInputManager->pointerConstraints().suspend();
 
     // Unfocus last surface if should
     if (m_focusSurface && !pWindowOwner)
@@ -266,15 +267,6 @@ void CFocusState::rawSurfaceFocus(SP<CWLSurfaceResource> pSurface, PHLWINDOW pWi
     m_focusSurface = pSurface;
 
     Event::bus()->m_events.input.keyboard.focus.emit(pSurface);
-
-    const auto SURF    = Desktop::View::CWLSurface::fromResource(pSurface);
-    const auto OLDSURF = Desktop::View::CWLSurface::fromResource(PLASTSURF);
-
-    if (OLDSURF && OLDSURF->constraint())
-        OLDSURF->constraint()->deactivate();
-
-    if (SURF && SURF->constraint())
-        SURF->constraint()->activate();
 }
 
 void CFocusState::rawMonitorFocus(PHLMONITOR pMonitor) {
@@ -331,6 +323,9 @@ bool CFocusState::isWindowActive(PHLWINDOW pWindow) const {
 }
 
 bool Desktop::isHardInputFocusReason(eFocusReason r) {
-    return r == FOCUS_REASON_NEW_WINDOW || r == FOCUS_REASON_KEYBIND || r == FOCUS_REASON_GHOSTS || r == FOCUS_REASON_CLICK_UP || r == FOCUS_REASON_DESKTOP_STATE_CHANGE ||
-        r == FOCUS_REASON_UNMAP_WINDOW_TILING || r == FOCUS_REASON_SWITCH_TO_WINDOW_HARD;
+
+    static const auto PFOLLOW_FOCUS = CConfigValue<Config::INTEGER>("scrolling:follow_focus");
+
+    return r == FOCUS_REASON_NEW_WINDOW || r == FOCUS_REASON_KEYBIND || r == FOCUS_REASON_GHOSTS || ((*PFOLLOW_FOCUS == 1) ? (r == FOCUS_REASON_CLICK_UP) : false) ||
+        r == FOCUS_REASON_DESKTOP_STATE_CHANGE || r == FOCUS_REASON_UNMAP_WINDOW_TILING || r == FOCUS_REASON_SWITCH_TO_WINDOW_HARD;
 }

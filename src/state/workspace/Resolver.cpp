@@ -141,6 +141,10 @@ State::Workspace::STarget CWorkspaceResolver::getWorkspaceTargetFromString(const
         const auto ADDRESS = in.substr(5);
         if (ADDRESS.empty())
             return {};
+        if (isNumber2(ADDRESS)) {
+            LOG(Log::ERR, "name: cannot name a workspace with a number");
+            return {};
+        }
         return {.id = ::Workspace::SWorkspaceSpecialID{}, .address = ADDRESS, .displayName = ADDRESS, .type = ::Workspace::eWorkspaceType::NORMAL};
     }
 
@@ -178,6 +182,12 @@ State::Workspace::STarget CWorkspaceResolver::getWorkspaceTargetFromString(const
         if (!BASEMONITOR || !valid(BASEMONITOR->m_activeWorkspace))
             return {};
         return Desktop::History::workspaceTracker()->previousWorkspace(BASEMONITOR->m_activeWorkspace).target;
+    }
+
+    if (in == "previous_per_monitor") {
+        if (!BASEMONITOR || !valid(BASEMONITOR->m_activeWorkspace))
+            return {};
+        return Desktop::History::workspaceTracker()->previousWorkspace(BASEMONITOR->m_activeWorkspace, BASEMONITOR).target;
     }
 
     if (in == "next") {
@@ -248,11 +258,19 @@ State::Workspace::STarget CWorkspaceResolver::getWorkspaceTargetFromString(const
         }
 
         const auto ID = offsetAvailableWorkspace(ACTIVE_NUMBERED.value_or(0), remains, unavailable);
+
         if (ID)
             return numberedTarget(*ID);
+
         if (remains < 0 && !named.empty())
             return targetFor(named.back());
-        return remains < 0 ? numberedTarget(1) : State::Workspace::STarget{};
+
+        if (remains < 0) {
+            const auto FIRST = availableWorkspaceAt(1, unavailable);
+            return FIRST ? numberedTarget(*FIRST) : State::Workspace::STarget{};
+        }
+
+        return {};
     }
 
     if (in.size() > 2 && (in[0] == 'm' || in[0] == 'e') && (in[1] == '-' || in[1] == '+' || in[1] == '~') && isNumber(in.substr(2))) {

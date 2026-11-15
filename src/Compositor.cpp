@@ -10,7 +10,6 @@
 #include "desktop/history/WorkspaceHistoryTracker.hpp"
 #include "helpers/Splashes.hpp"
 #include "helpers/SystemInfo.hpp"
-#include "init/initHelpers.hpp"
 #include "config/ConfigValue.hpp"
 #include "config/shared/inotify/ConfigWatcher.hpp"
 #include "config/shared/monitor/MonitorRuleManager.hpp"
@@ -78,9 +77,12 @@
 #include <sys/stat.h>
 #include <sys/resource.h>
 #include <sys/ioctl.h>
-#include <malloc.h>
 #include <unistd.h>
 #include <xf86drm.h>
+
+#if !defined(__OpenBSD__)
+#include <malloc.h>
+#endif
 
 #if defined(__linux__)
 #include <linux/vt.h>
@@ -352,7 +354,7 @@ void CCompositor::initServer(std::string socketName, int socketFd) {
     LOG(Log::DEBUG, "{}", Helpers::SystemInfo::getSystemInfo());
     LOG(Log::DEBUG, "========================");
     LOG(Log::DEBUG, "\n\n"); // pad
-    LOG(Log::INFO, "If you are crashing, or encounter any bugs, please consult https://wiki.hypr.land/Crashes-and-Bugs/\n\n");
+    LOG(Log::INFO, "If you are crashing, or encounter any bugs, please consult https://wiki.hypr.land/crashes-and-bugs/\n\n");
     LOG(Log::DEBUG, "\nCurrent splash: {}\n\n", m_currentSplash);
 
     m_drm.fd = m_aqBackend->drmFD();
@@ -584,6 +586,9 @@ void CCompositor::cleanup() {
 #endif
 
     cleanEnvironment();
+
+    if (g_pHyprRenderer)
+        g_pHyprRenderer->context().m_pass.clear();
 
     // unload all remaining plugins while the compositor is
     // still in a normal working state.
@@ -832,9 +837,6 @@ void CCompositor::startCompositor() {
         if (!writeWatchdogFd("vax"))
             LOG(Log::ERR, "startCompositor: failed to write to watchdogWriteFd {}: {}", m_watchdogWriteFd.get(), strerror(errno));
     }
-
-    if (!Env::envEnabled("HYPRLAND_NO_RT"))
-        NInit::gainRealTime();
 
     // This blocks until we are done.
     LOG(Log::DEBUG, "Hyprland is ready, running the event loop!");

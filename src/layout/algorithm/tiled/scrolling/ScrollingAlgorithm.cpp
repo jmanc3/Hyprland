@@ -410,16 +410,30 @@ void SScrollingData::fitCol(SP<SColumnData> c) {
         controller->fitStrip(colIdx, USABLE, *PFSONONE);
 }
 
+void SScrollingData::clampedCenterCol(SP<SColumnData> c) {
+    if (!c)
+        return;
+
+    static const auto PFSONONE = CConfigValue<Config::INTEGER>("scrolling:fullscreen_on_one_column");
+    const auto        USABLE   = algorithm->usableArea();
+    int64_t           colIdx   = idx(c);
+
+    if (colIdx >= 0)
+        controller->clampedCenterStrip(colIdx, USABLE, *PFSONONE);
+}
+
 void SScrollingData::centerOrFitCol(SP<SColumnData> c) {
     if (!c)
         return;
 
     static const auto PFITMETHOD = CConfigValue<Config::INTEGER>("scrolling:focus_fit_method");
 
-    if (*PFITMETHOD == 1)
+    if (*PFITMETHOD == 0)
+        centerCol(c);
+    else if (*PFITMETHOD == 1)
         fitCol(c);
     else
-        centerCol(c);
+        clampedCenterCol(c);
 }
 
 SP<SColumnData> SScrollingData::atCenter() {
@@ -455,7 +469,11 @@ void SScrollingData::recalculate(bool forceInstant) {
     // If there is a default covering fullscreen window (tiled or floating)
     if (const auto FULLSCREEN_WINDOW = Fullscreen::controller()->getFullscreenWindow(WORKSPACE, true);
         FULLSCREEN_WINDOW && !Fullscreen::controller()->layoutManagedFS(FULLSCREEN_WINDOW)) {
+
+        // This will function the same way as m_defaultFullscreenHandler's setNoMembersAboveFullscreen() function call
         algorithm->m_scrollingFullscreenHandler->setNoMembersAboveFullscreen();
+        // This will sync the size of the FS window
+        algorithm->m_defaultFullscreenHandler->syncTargetSizeAndPosition();
         return;
     }
 
@@ -468,15 +486,13 @@ void SScrollingData::recalculate(bool forceInstant) {
         CBox       visual        = logical;
         const bool PRIMARY_HORIZ = controller->isPrimaryHorizontal();
 
-        const bool COL_NOT_LEFT      = controller->isReversed() ? colIdx + 1 < columns.size() : colIdx > 0;
-        const bool COL_NOT_RIGHT     = controller->isReversed() ? colIdx > 0 : colIdx + 1 < columns.size();
         const bool TARGET_NOT_TOP    = controller->isReversed() ? targetIdx + 1 < columns[colIdx]->targetDatas.size() : targetIdx > 0;
         const bool TARGET_NOT_BOTTOM = controller->isReversed() ? targetIdx > 0 : targetIdx + 1 < columns[colIdx]->targetDatas.size();
 
-        const bool GAP_LEFT   = PRIMARY_HORIZ ? COL_NOT_LEFT : TARGET_NOT_TOP;
-        const bool GAP_RIGHT  = PRIMARY_HORIZ ? COL_NOT_RIGHT : TARGET_NOT_BOTTOM;
-        const bool GAP_TOP    = PRIMARY_HORIZ ? TARGET_NOT_TOP : COL_NOT_LEFT;
-        const bool GAP_BOTTOM = PRIMARY_HORIZ ? TARGET_NOT_BOTTOM : COL_NOT_RIGHT;
+        const bool GAP_LEFT   = PRIMARY_HORIZ || TARGET_NOT_TOP;
+        const bool GAP_RIGHT  = PRIMARY_HORIZ || TARGET_NOT_BOTTOM;
+        const bool GAP_TOP    = !PRIMARY_HORIZ || TARGET_NOT_TOP;
+        const bool GAP_BOTTOM = !PRIMARY_HORIZ || TARGET_NOT_BOTTOM;
 
         const auto GAPOFFSETTOPLEFT     = Vector2D(sc<double>(GAP_LEFT ? GAPSIN.m_left : 0), sc<double>(GAP_TOP ? GAPSIN.m_top : 0));
         const auto GAPOFFSETBOTTOMRIGHT = Vector2D(sc<double>(GAP_RIGHT ? GAPSIN.m_right : 0), sc<double>(GAP_BOTTOM ? GAPSIN.m_bottom : 0));
@@ -630,8 +646,9 @@ CScrollingAlgorithm::CScrollingAlgorithm() : m_scrollingFullscreenHandler(makeUn
     m_mouseButtonCallback = Event::bus()->m_events.input.mouse.button.listen([this](IPointer::SButtonEvent e, Event::SCallbackInfo&) {
         static const auto PFOLLOW_FOCUS = CConfigValue<Config::INTEGER>("scrolling:follow_focus");
 
+        // click-down shouldn't cause viewport moves
         if (*PFOLLOW_FOCUS && e.state == WL_POINTER_BUTTON_STATE_RELEASED && Desktop::focusState()->window())
-            focusOnInput(Desktop::focusState()->window()->layoutTarget(), INPUT_MODE_CLICK);
+            focusOnInput(Desktop::focusState()->window()->layoutTarget(), (*PFOLLOW_FOCUS == 1) ? INPUT_MODE_CLICK : INPUT_MODE_SOFT);
     });
 
     m_focusCallback = Event::bus()->m_events.window.active.listen([this](PHLWINDOW pWindow, Desktop::eFocusReason reason) {
@@ -711,11 +728,7 @@ void CScrollingAlgorithm::focusOnInput(SP<ITarget> target, eInputMode input) {
     if (m_scrollingData->visible(TARGETDATA->column.lock(), true) && input != INPUT_MODE_HARD)
         return;
 
-    static const auto PFITMETHOD = CConfigValue<Config::INTEGER>("scrolling:focus_fit_method");
-    if (*PFITMETHOD == 1)
-        m_scrollingData->fitCol(TARGETDATA->column.lock());
-    else
-        m_scrollingData->centerCol(TARGETDATA->column.lock());
+    m_scrollingData->centerOrFitCol(TARGETDATA->column.lock());
     m_scrollingData->recalculate();
 }
 
@@ -836,15 +849,18 @@ void CScrollingAlgorithm::resizeTarget(const Vector2D& delta, SP<ITarget> target
     if (!DATA->column || !DATA->column->scrollingData)
         return;
 
-    static const auto PFSONONE = CConfigValue<Config::INTEGER>("scrolling:fullscreen_on_one_column");
+    static const auto PFSONONE               = CConfigValue<Config::INTEGER>("scrolling:fullscreen_on_one_column");
+    static auto       PANIMATE_MANUAL_RESIZE = CConfigValue<Config::INTEGER>("misc:animate_manual_resizes");
+    // FIX: ugly hack to see if it's a mouse or trackpad resize. Dragcontroller needs to either stop doing things or do ALL the things before this can be redone.
+    const bool    FORCEINSTANT = (corner != CORNER_NONE) && !*PANIMATE_MANUAL_RESIZE;
 
-    const auto        ADJUSTED_DELTA = m_scrollingData->controller->isPrimaryHorizontal() ? delta : Vector2D{delta.y, delta.x};
-    const auto        USABLE         = usableArea();
-    const auto        DELTA_AS_PERC  = ADJUSTED_DELTA / USABLE.size();
-    Vector2D          modDelta       = ADJUSTED_DELTA;
+    const auto    ADJUSTED_DELTA = m_scrollingData->controller->isPrimaryHorizontal() ? delta : Vector2D{delta.y, delta.x};
+    const auto    USABLE         = usableArea();
+    const auto    DELTA_AS_PERC  = ADJUSTED_DELTA / USABLE.size();
+    Vector2D      modDelta       = ADJUSTED_DELTA;
 
-    const auto        CURR_COLUMN = DATA->column.lock();
-    const int64_t     COL_IDX     = m_scrollingData->idx(CURR_COLUMN);
+    const auto    CURR_COLUMN = DATA->column.lock();
+    const int64_t COL_IDX     = m_scrollingData->idx(CURR_COLUMN);
 
     if (COL_IDX < 0)
         return;
@@ -941,7 +957,7 @@ void CScrollingAlgorithm::resizeTarget(const Vector2D& delta, SP<ITarget> target
         }
     }
 
-    m_scrollingData->recalculate(true);
+    m_scrollingData->recalculate(FORCEINSTANT);
 }
 
 void CScrollingAlgorithm::recalculate(eRecalculateReason reason) {
@@ -1155,14 +1171,6 @@ Config::ErrorResult CScrollingAlgorithm::layoutMsg(const std::string_view& sv) {
     const auto notFound   = [](std::string msg) { return Config::configError(std::move(msg), Config::eConfigErrorLevel::WARNING, Config::eConfigErrorCode::NOT_FOUND); };
     const auto stateErr   = [](std::string msg) { return Config::configError(std::move(msg), Config::eConfigErrorLevel::WARNING, Config::eConfigErrorCode::INVALID_STATE); };
 
-    auto       centerOrFit = [this](const SP<SColumnData> COL) -> void {
-        static const auto PFITMETHOD = CConfigValue<Config::INTEGER>("scrolling:focus_fit_method");
-        if (*PFITMETHOD == 1)
-            m_scrollingData->fitCol(COL);
-        else
-            m_scrollingData->centerCol(COL);
-    };
-
     const auto ARGS = CVarList(std::string{sv}, 0, ' ');
     if (ARGS[0] == "move") {
         if (ARGS[1] == "+col" || ARGS[1] == "col") {
@@ -1180,7 +1188,7 @@ Config::ErrorResult CScrollingAlgorithm::layoutMsg(const std::string_view& sv) {
                 return {};
             }
 
-            centerOrFit(COL);
+            m_scrollingData->centerOrFitCol(COL);
             m_scrollingData->recalculate();
 
             focusTargetUpdate(COL->targetDatas.front()->target.lock());
@@ -1206,7 +1214,7 @@ Config::ErrorResult CScrollingAlgorithm::layoutMsg(const std::string_view& sv) {
             if (!COL)
                 return {};
 
-            centerOrFit(COL);
+            m_scrollingData->centerOrFitCol(COL);
             m_scrollingData->recalculate();
 
             focusTargetUpdate(COL->targetDatas.back()->target.lock());
@@ -1352,7 +1360,7 @@ Config::ErrorResult CScrollingAlgorithm::layoutMsg(const std::string_view& sv) {
                 WDATA->column->setColumnWidth(rem);
 
                 m_scrollingData->controller->setOffset(0);
-                centerOrFit(USED_COL);
+                m_scrollingData->centerOrFitCol(USED_COL);
                 m_scrollingData->recalculate();
             }
 
@@ -1508,7 +1516,7 @@ Config::ErrorResult CScrollingAlgorithm::layoutMsg(const std::string_view& sv) {
             auto PREV = m_scrollingData->prev(TDATA->column.lock());
             if (!PREV) {
                 if (*PNOFALLBACK) {
-                    centerOrFit(TDATA->column.lock());
+                    m_scrollingData->centerOrFitCol(TDATA->column.lock());
                     m_scrollingData->recalculate();
                     if (TDATA->target->window())
                         Pointer::pointerController()->warpTo(TDATA->target->window()->middle());
@@ -1520,7 +1528,7 @@ Config::ErrorResult CScrollingAlgorithm::layoutMsg(const std::string_view& sv) {
             auto pTargetData = findBestNeighbor(TDATA, PREV);
             if (pTargetData) {
                 focusTargetUpdate(pTargetData->target.lock());
-                centerOrFit(PREV);
+                m_scrollingData->centerOrFitCol(PREV);
                 m_scrollingData->recalculate();
                 if (pTargetData->target->window())
                     Pointer::pointerController()->warpTo(pTargetData->target->window()->middle());
@@ -1530,7 +1538,7 @@ Config::ErrorResult CScrollingAlgorithm::layoutMsg(const std::string_view& sv) {
             auto NEXT = m_scrollingData->next(TDATA->column.lock());
             if (!NEXT) {
                 if (*PNOFALLBACK) {
-                    centerOrFit(TDATA->column.lock());
+                    m_scrollingData->centerOrFitCol(TDATA->column.lock());
                     m_scrollingData->recalculate();
                     if (TDATA->target->window())
                         Pointer::pointerController()->warpTo(TDATA->target->window()->middle());
@@ -1542,7 +1550,7 @@ Config::ErrorResult CScrollingAlgorithm::layoutMsg(const std::string_view& sv) {
             auto pTargetData = findBestNeighbor(TDATA, NEXT);
             if (pTargetData) {
                 focusTargetUpdate(pTargetData->target.lock());
-                centerOrFit(NEXT);
+                m_scrollingData->centerOrFitCol(NEXT);
                 m_scrollingData->recalculate();
                 if (pTargetData->target->window())
                     Pointer::pointerController()->warpTo(pTargetData->target->window()->middle());
@@ -1859,6 +1867,10 @@ double CScrollingAlgorithm::normalizedTapeOffset() {
         return 0.0;
 
     return m_scrollingData->controller->getOffset() / primary;
+}
+
+double CScrollingAlgorithm::getScrollingTapeOffset() {
+    return m_scrollingData->controller->getOffset();
 }
 
 std::optional<Vector2D> CScrollingAlgorithm::predictSizeForNewTarget() {

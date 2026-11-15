@@ -131,6 +131,8 @@ CWaylandBackend::CWaylandBackend(SP<CXDGSurfaceResource> resource) : m_resource(
     m_listeners.unmap   = resource->m_events.unmap.listen([this] {
         m_mapped = false;
         m_events.unmap.emit();
+        m_initialCommit = true;
+        m_pendingReportedSize.reset();
     });
     m_listeners.commit  = resource->m_events.commit.listen([this] {
         const bool INITIAL = m_initialCommit;
@@ -299,18 +301,22 @@ Vector2D CWaylandBackend::bufferToSurfaceLocal(const Vector2D& buffer) const {
     return buffer;
 }
 
+Vector2D CWaylandBackend::globalToBuffer(const Vector2D& pos, const Vector2D& origin) const {
+    return pos - origin;
+}
+
 void CWaylandBackend::configure(const CBox& logicalBox, PHLMONITOR preferredMonitor, bool force) {
     const auto RESOURCE = m_resource.lock();
     const auto TOPLEVEL = RESOURCE ? RESOURCE->m_toplevel.lock() : nullptr;
     if (!TOPLEVEL)
         return;
 
-    const auto CLIENT_BOX = logicalToClient(logicalBox, preferredMonitor);
-    if (!force && m_pendingReportedSize == CLIENT_BOX.size())
+    const auto CLIENT_SIZE = logicalToClient(logicalBox, preferredMonitor).size().floor();
+    if (!force && m_pendingReportedSize == CLIENT_SIZE)
         return;
 
-    m_pendingReportedSize = CLIENT_BOX.size();
-    m_configureAcks.add(TOPLEVEL->setSize(CLIENT_BOX.size()), CLIENT_BOX.size().floor());
+    m_pendingReportedSize = CLIENT_SIZE;
+    m_configureAcks.add(TOPLEVEL->setSize(CLIENT_SIZE), CLIENT_SIZE);
 }
 
 void CWaylandBackend::acknowledgeConfigure(const CBox& clientBox) {

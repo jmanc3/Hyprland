@@ -30,7 +30,8 @@ CDynamicPermissionRule::CDynamicPermissionRule(wl_client* const client, eDynamic
     wl_list_init(&m_destroyWrapper.listener.link);
     m_destroyWrapper.listener.notify = ::clientDestroyInternal;
     m_destroyWrapper.parent          = this;
-    wl_display_add_destroy_listener(g_pCompositor->m_wlDisplay, &m_destroyWrapper.listener);
+    if (client)
+        wl_client_add_destroy_listener(client, &m_destroyWrapper.listener);
 }
 
 CDynamicPermissionRule::~CDynamicPermissionRule() {
@@ -272,8 +273,7 @@ void CDynamicPermissionManager::askForPermission(wl_client* client, const std::s
     } else
         options = {DENY, ALLOW};
 
-    rule->m_dialogBox             = CAsyncDialogBox::create(I18n::i18nEngine()->localize(I18n::TXT_KEY_PERMISSION_TITLE), description, options);
-    rule->m_dialogBox->m_priority = true;
+    rule->m_dialogBox = CAsyncDialogBox::create(I18n::i18nEngine()->localize(I18n::TXT_KEY_PERMISSION_TITLE), description, options);
 
     if (!rule->m_dialogBox) {
         LOG(Log::ERR, "CDynamicPermissionManager::askForPermission: hyprland-guiutils likely missing, cannot ask! Disabling permission control...");
@@ -281,7 +281,8 @@ void CDynamicPermissionManager::askForPermission(wl_client* client, const std::s
         return;
     }
 
-    rule->m_promise = rule->m_dialogBox->open();
+    rule->m_dialogBox->m_priority = true;
+    rule->m_promise               = rule->m_dialogBox->open();
     rule->m_promise->then([r = WP<CDynamicPermissionRule>(rule), binaryPath, ALLOW, ALLOW_AND_REMEMBER, ALLOW_ONCE, DENY](SP<CPromiseResult<std::string>> pr) {
         if (!r)
             return;

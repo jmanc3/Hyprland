@@ -2,6 +2,7 @@
 
 #include "Check.hpp"
 
+#include "../objects/LuaDevice.hpp"
 #include "../objects/LuaLayerSurface.hpp"
 #include "../objects/LuaMonitor.hpp"
 #include "../objects/LuaWindow.hpp"
@@ -16,6 +17,9 @@
 #include "../../../pointer/PointerManager.hpp"
 #include "../../../state/MonitorState.hpp"
 #include "../../../state/WorkspaceState.hpp"
+
+#include "../../../layout/algorithm/tiled/scrolling/ScrollingAlgorithm.hpp"
+#include "layout/algorithm/Algorithm.hpp"
 
 #include <hyprutils/utils/ScopeGuard.hpp>
 
@@ -235,6 +239,39 @@ static int hlGetMonitors(lua_State* L) {
     return 1;
 }
 
+static int hlGetDevices(lua_State* L) {
+    lua_newtable(L);
+    if (!g_pInputManager)
+        return 1;
+
+    int        i      = 1;
+    const auto append = [&](const auto& devices) {
+        for (const auto& device : devices) {
+            if (!device)
+                continue;
+
+            Objects::CLuaDevice::push(L, WP<IHID>{device});
+            lua_rawseti(L, -2, i++);
+        }
+    };
+
+    append(g_pInputManager->m_pointers);
+    append(g_pInputManager->m_keyboards);
+    append(g_pInputManager->m_tabletPads);
+    append(g_pInputManager->m_tablets);
+    append(g_pInputManager->m_tabletTools);
+    append(g_pInputManager->m_touches);
+    for (const auto& device : g_pInputManager->m_switches) {
+        if (!device.pDevice)
+            continue;
+
+        Objects::CLuaDevice::push(L, device.pDevice, rc<uintptr_t>(&device));
+        lua_rawseti(L, -2, i++);
+    }
+
+    return 1;
+}
+
 static int hlGetMonitor(lua_State* L) {
     const auto PMONITOR = Internal::monitorFromLuaSelectorOrObject(L, 1, "hl.get_monitor");
     if (!PMONITOR) {
@@ -413,7 +450,78 @@ static int hlGetCurrentSubmap(lua_State* L) {
     return 1;
 }
 
+// Layout specific convenience functions
+
+static int hlScrollingGetOffset(lua_State* L) {
+
+    const auto MONITOR = Desktop::focusState()->monitor();
+
+    if (!MONITOR) {
+        lua_pushnil(L);
+        return 1;
+    }
+
+    const auto WORKSPACE = MONITOR->getCurrentWorkspace();
+    if (!WORKSPACE || !WORKSPACE->space() || !WORKSPACE->space()->algorithm()) {
+        lua_pushnil(L);
+        return 1;
+    }
+
+    const auto SCROLLING_ALGO = dynamic_cast<Layout::Tiled::CScrollingAlgorithm*>(WORKSPACE->space()->algorithm()->tiledAlgo().get());
+    if (!SCROLLING_ALGO) {
+        lua_pushnil(L);
+        return 1;
+    }
+
+    lua_pushnumber(L, SCROLLING_ALGO->getScrollingTapeOffset());
+    return 1;
+}
+
+static int hlScrollingSetOffset(lua_State* L) {
+
+    if (!lua_isnumber(L, 1)) {
+        Config::Lua::Bindings::Internal::configError(L, "hl.set_scrolling_offset expects a number as argument.");
+        lua_pushboolean(L, false);
+        return 1;
+    }
+
+    const auto MONITOR = Desktop::focusState()->monitor();
+
+    if (!MONITOR) {
+        lua_pushboolean(L, false);
+        return 1;
+    }
+
+    const auto WORKSPACE = MONITOR->getCurrentWorkspace();
+    if (!WORKSPACE || !WORKSPACE->space() || !WORKSPACE->space()->algorithm()) {
+        lua_pushboolean(L, false);
+        return 1;
+    }
+
+    const auto SCROLLING_ALGO = dynamic_cast<Layout::Tiled::CScrollingAlgorithm*>(WORKSPACE->space()->algorithm()->tiledAlgo().get());
+    if (!SCROLLING_ALGO) {
+        lua_pushboolean(L, false);
+        return 1;
+    }
+
+    const double NEW_OFFSET = sc<double>(lua_tonumber(L, 1));
+
+    if (!std::isfinite(NEW_OFFSET) || NEW_OFFSET < 0) {
+        Config::Lua::Bindings::Internal::configError(L, "hl.set_scrolling_offset expects a finite positive number.");
+        lua_pushboolean(L, false);
+        return 1;
+    }
+
+    const double CURRENT_OFFSET = SCROLLING_ALGO->getScrollingTapeOffset();
+
+    SCROLLING_ALGO->moveTape(CURRENT_OFFSET - NEW_OFFSET);
+
+    lua_pushboolean(L, true);
+    return 1;
+}
+
 void Internal::registerQueryBindings(lua_State* L) {
+    Internal::setFn(L, "get_devices", hlGetDevices);
     Internal::setFn(L, "get_windows", hlGetWindows);
     Internal::setFn(L, "get_window", hlGetWindow);
     Internal::setFn(L, "get_active_window", hlGetActiveWindow);
@@ -433,4 +541,10 @@ void Internal::registerQueryBindings(lua_State* L) {
     Internal::setFn(L, "get_last_window", hlGetLastWindow);
     Internal::setFn(L, "get_last_workspace", hlGetLastWorkspace);
     Internal::setFn(L, "get_current_submap", hlGetCurrentSubmap);
+
+    // Layout specific helpers
+
+    // Scrolling
+    Internal::setFn(L, "get_scrolling_offset", hlScrollingGetOffset);
+    Internal::setFn(L, "set_scrolling_offset", hlScrollingSetOffset);
 }

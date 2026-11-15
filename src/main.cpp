@@ -16,7 +16,6 @@ using namespace Hyprutils::String;
 using namespace Hyprutils::Memory;
 
 #include <fcntl.h>
-#include <iostream>
 #include <iterator>
 #include <vector>
 #include <stdexcept>
@@ -256,9 +255,9 @@ int main(int argc, char** argv) {
 
 )#");
     }
-
+#if defined(__linux__)
     NInit::lowerAmbientCaps();
-
+#endif
     // let's init the compositor.
     // it initializes basic Wayland stuff in the constructor.
     try {

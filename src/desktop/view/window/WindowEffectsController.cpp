@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "Window.hpp"
+#include "WindowPresentation.hpp"
 #include "../../../managers/input/InputManager.hpp"
 #include "../../../render/Renderer.hpp"
 #include "../../../render/transformer/MotionBlurTransformer.hpp"
@@ -57,7 +58,7 @@ void CWindowEffectsController::recordMotionBlur(const CBox& previous, const CBox
 
     constexpr double MIN_EDGE_DELTA_PX = 2.0;
 
-    const auto       PMONITOR = m_window.m_monitor.lock();
+    const auto       PMONITOR = m_window.presentation().monitor();
     const double     SCALE    = PMONITOR ? PMONITOR->m_scale : 1.0;
     const double     DELTA    = std::max({std::abs(previous.x - current.x), std::abs(previous.y - current.y), std::abs(previous.x + previous.w - current.x - current.w),
                                           std::abs(previous.y + previous.h - current.y - current.h)}) *
@@ -153,12 +154,13 @@ CBox CWindowEffectsController::transformBoxForDamage(const CBox& currentBox) con
     return m_transformers->transformBoxForDamage(currentBox);
 }
 
-void CWindowEffectsController::preWindowRender(CSurfacePassElement::SRenderData* renderData) const {
-    m_transformers->preWindowRender(renderData);
+void CWindowEffectsController::preWindowRender(Render::CRenderContext& ctx, CSurfacePassElement::SRenderData* renderData) const {
+    m_transformers->preWindowRender(ctx, renderData);
 }
 
-void CWindowEffectsController::amendTransformedRenderData(const CBox& currentBox, SMotionBlurData* motionBlurData) const {
-    m_transformers->amendTransformedRenderData(currentBox, motionBlurData);
+void CWindowEffectsController::amendTransformedRenderData(Render::CRenderContext& ctx, const CBox& currentBox, SMotionBlurData* motionBlurData,
+                                                          const Render::SWindowRenderPresentation& presentation) const {
+    m_transformers->amendTransformedRenderData(ctx, currentBox, motionBlurData, presentation);
 }
 
 const UP<Render::CWindowTransformerList>& CWindowEffectsController::transformers() const {
